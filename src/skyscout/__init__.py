@@ -1,0 +1,2 @@
+"""SkyScout onboard vision pipeline."""
+

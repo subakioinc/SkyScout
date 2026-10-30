@@ -46,3 +46,33 @@ SkyScout는 드론의 온보드 컴퓨터에서 동작하는 실시간 영상 �
 | [RT-DETR](https://arxiv.org/abs/2304.08069) | 실시간 탐지를 목표로 한 Transformer 계열 모델입니다. 정확도 중심의 비교 후보이며, 온보드 처리 속도와 메모리 사용량을 실측해야 합니다. | 정확도가 우선이고 연산 자원에 여유가 있는 장비 |
 
 우선 경량 YOLO와 ONNX Runtime으로 `카메라 입력 → 탐지 → 붉은 박스 표시 → 외부 전송` 흐름을 구현합니다. 이후 실제 온보드 장비에서 초당 처리 프레임 수, 영상 지연, 전력 소모, 멀리 있는 사람·차량의 탐지율을 측정해 가속 방식이나 모델 변경 여부를 결정합니다. 드론의 높은 시점에서 촬영한 물체가 잘 탐지되지 않으면 해당 환경의 영상을 수집해 모델을 추가 학습합니다.
+
+## 첫 구현 실행
+
+현재 `src/skyscout`에는 USB 카메라 입력, VisDrone 계열 YOLO11 ONNX 탐지, 붉은 박스 표시, H.264/RTSP 송출이 구현되어 있습니다. 기본값은 카메라 0번의 1920×1080 입력·출력, 15fps 요청, 640px 추론, CPU 실행입니다. 실제 카메라가 이 포맷을 지원하는지와 장비에서 달성되는 속도는 별도로 확인해야 합니다.
+
+Ubuntu에서 시스템 패키지를 설치합니다. `python3-gi`를 가상 환경에서도 사용하기 위해 `--system-site-packages`로 환경을 만듭니다.
+
+```bash
+sudo apt update
+sudo apt install python3-venv python3-gi gir1.2-gstreamer-1.0 gir1.2-gst-rtsp-server-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+탐지 모델 가중치는 저장소에 포함하지 않습니다. [항공 영상용 후보 모델](https://huggingface.co/dronefreak/visdrone-yolo11n)의 사용 조건을 확인한 뒤 `best.pt`를 별도로 확보하고, 개발 컴퓨터에서 ONNX로 변환합니다. 변환용 `ultralytics`는 온보드 실행 의존성이 아닙니다.
+
+```bash
+python -m pip install ultralytics
+python -m skyscout.prepare_model --weights models/best.pt --image-size 640
+skyscout --model models/best.onnx --source 0
+```
+
+GCS에서 `rtsp://<드론-IP>:8554/skyscout`에 접속합니다. 저장 영상으로 시험할 때는 `--source 영상파일.mp4 --loop`를 사용합니다. 다른 ONNX 실행 제공자는 `--provider`로 지정할 수 있습니다. 기본 H.264 인코더는 GStreamer `x264enc`이며, 장비에 맞는 인코더가 확인되면 `--encoder-pipeline`으로 교체할 수 있습니다. 프로그램은 카메라가 끊어졌을 때 재연결을 시도하며, 처리 속도보다 입력이 빠르면 오래된 프레임을 버립니다.
+
+```bash
+python -m unittest discover -s tests
+```
+
+Jetson Nano의 Ubuntu 22.04/24.04 지원 문제와 후보 모델의 배포·상업적 사용 조건은 [Plan.md](Plan.md)의 선결 항목을 따릅니다. 하드웨어 가속, 실장비 RTSP/GCS 연결, 비행 고도별 탐지율은 아직 실측 전입니다.
