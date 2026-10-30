@@ -102,7 +102,60 @@ ffplay -rtsp_transport tcp rtsp://<드론-IP>:8554/skyscout
 
 송출 프로세스는 카메라를 계속 읽고 탐지하며, RTSP 클라이언트가 연결되면 영상을 전송합니다. 연결되지 않으면 드론과 GCS 사이의 IP 경로, 8554/TCP 접근, RTSP 주소와 GCS의 코덱 지원을 확인합니다.
 
-## 7. 동작 확인과 문제 해결
+## 7. 부팅 시 자동 실행 (systemd)
+
+2~5절에 따라 Ubuntu 장비에 설치하고, `models/best.onnx`를 배치한 뒤 수동 실행으로 카메라와 RTSP 송출을 확인합니다. 저장소는 부팅 후에도 유지되는 경로에 두어야 합니다. 아래 예시는 사용자 `ubuntu`가 `/home/ubuntu/SkyScout`에 설치한 경우입니다. 실제 사용자명과 저장소 절대 경로는 `whoami`, `pwd -P`로 확인하여 서비스 파일의 `User`, `WorkingDirectory`, `ExecStart`에 반영합니다.
+
+```bash
+whoami
+pwd -P
+ls -l models/best.onnx /dev/video0
+```
+
+`/etc/systemd/system/skyscout.service`를 만들고 다음 내용을 저장합니다.
+
+```bash
+sudo nano /etc/systemd/system/skyscout.service
+```
+
+```ini
+[Unit]
+Description=SkyScout object detection and RTSP stream
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+SupplementaryGroups=video
+WorkingDirectory=/home/ubuntu/SkyScout
+ExecStart=/home/ubuntu/SkyScout/.venv/bin/skyscout --model /home/ubuntu/SkyScout/models/best.onnx --source /dev/video0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+카메라 장치 접근은 일반적으로 `video` 그룹이 필요합니다. `ls -l /dev/video0`로 소유 그룹을 확인하고, 다르면 `SupplementaryGroups`를 그 그룹에 맞춥니다. 여러 카메라가 연결되어 `/dev/video0` 번호가 바뀔 수 있다면 `ls -l /dev/v4l/by-id/`로 고정 장치 경로를 찾아 `--source`에 사용합니다. 서비스의 실행 경로와 모델 경로는 반드시 절대 경로여야 하며, 실행 사용자가 저장소·모델 파일을 읽을 수 있어야 합니다.
+
+서비스를 등록하고 즉시 실행한 다음 상태와 로그를 확인합니다.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now skyscout.service
+systemctl status skyscout.service
+journalctl -u skyscout.service -b -f
+```
+
+로그 확인은 `Ctrl+C`로 끝낼 수 있습니다. `systemctl status`에서 `active (running)`을 확인하고 GCS에서 RTSP 영상도 수신해 봅니다. 이후 재부팅하여 자동 시작 여부를 확인합니다.
+
+```bash
+sudo reboot
+```
+
+재부팅 후 `systemctl status skyscout.service`와 `journalctl -u skyscout.service -b`로 확인합니다. 서비스 파일을 바꾸면 `sudo systemctl daemon-reload && sudo systemctl restart skyscout.service`를 실행합니다. 수동 중지는 `sudo systemctl stop skyscout.service`, 부팅 자동 실행 해제는 `sudo systemctl disable --now skyscout.service`입니다.
+
+## 8. 동작 확인과 문제 해결
 
 ```bash
 source .venv/bin/activate

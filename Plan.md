@@ -1,5 +1,31 @@
 # SkyScout 구현 계획
 
+## 전체 아키텍처
+
+```mermaid
+flowchart LR
+    subgraph preparation["개발 컴퓨터 · 모델 준비"]
+        weights["VisDrone 사전 학습 가중치"] --> export["YOLO11 모델을 ONNX로 변환"]
+    end
+
+    subgraph onboard["드론 온보드 Ubuntu 장비"]
+        systemd["systemd"] -.->|"부팅 시 시작 · 장애 시 재시작"| app["SkyScout 프로세스"]
+        model["ONNX 모델 파일"] -.->|"모델 로드"| detect["전처리 · ONNX Runtime 추론 · 사람/차량 선별"]
+        app --> capture["카메라 캡처 · 재연결"]
+        capture --> latest["최신 프레임만 보관"]
+        latest --> detect
+        detect --> overlay["원본 크기에 붉은 박스 표시"]
+        overlay --> encode["GStreamer H.264 인코딩"]
+        encode --> rtsp["RTSP 서버"]
+    end
+
+    export -->|"모델 파일 복사"| model
+    camera["USB 카메라 · 1080p 입력"] --> capture
+    rtsp -->|"네트워크 · RTSP/H.264"| gcs["GCS · 영상 수신/표시"]
+```
+
+카메라와 모델은 온보드 장비로 들어오고, 탐지와 영상 처리는 장비 안에서 수행됩니다. GCS에는 붉은 박스가 그려진 영상만 RTSP로 전달됩니다. `systemd`는 설치 후 부팅 시 프로세스를 시작하고 실패 시 재시작합니다. 모델 변환은 배포 전 별도로 수행합니다.
+
 ## 1. 목표와 범위
 
 - 드론의 온보드 컴퓨터에서 USB 카메라의 1920×1080 영상을 입력받아 사람과 차량을 탐지한다.
